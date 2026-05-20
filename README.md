@@ -1,5 +1,12 @@
 # Study Alert
 
+
+<img width="886" height="296" alt="image" src="https://github.com/user-attachments/assets/49d06aba-ed60-423d-a33e-599ad3e35d32" />
+
+
+<img width="904" height="290" alt="image" src="https://github.com/user-attachments/assets/9156ceba-12bc-4efe-bbe3-acb63b955f79" />
+
+
 macOS 전용 무음 팝업 알림 스케줄러입니다.
 
 ```bash
