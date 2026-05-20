@@ -15,15 +15,25 @@ Usage:
 Routine alerts:
   07:00 기상
   07:10 코테 1문제
+  07:50 코테 1문제
   08:00 데일리 스크럼
+  08:20 데일리 스크럼
   08:20 기업 정하기
+  09:50 기업 정하기
   10:00 이력서 작성
+  10:50 이력서 작성
   11:00 포트폴리오 작성
+  11:50 포트폴리오 작성
   13:00 프로젝트 성능개선 - Habruta(~5/10) / BookPick(~~5월) / OurUniverse(~~6월)
+  15:50 프로젝트 성능개선 - Habruta(~5/10) / BookPick(~~5월) / OurUniverse(~~6월)
   17:00 해커톤 / 오픈소스 / 방향성 점검 / 회고(루틴점검) (3일 주기 운영)
+  17:50 해커톤 / 오픈소스 / 방향성 점검 / 회고(루틴점검) (3일 주기 운영)
   19:00 CS 학습
+  19:50 CS 학습
   20:00 못한 작업 하기
+  20:50 못한 작업 하기
   21:00 운동
+  22:00 운동
 EOF
 }
 
@@ -36,22 +46,25 @@ require_macos() {
   [[ "$(uname -s)" == "Darwin" ]] || die "this script is macOS-only"
 }
 
-label_for_time() {
+label_for_alert() {
   local hour="$1"
   local minute="$2"
-  printf '%s.h%02dm%02d' "$LABEL_PREFIX" "$hour" "$minute"
+  local key="$3"
+  printf '%s.h%02dm%02d.%s' "$LABEL_PREFIX" "$hour" "$minute" "$key"
 }
 
-plist_for_time() {
+plist_for_alert() {
   local hour="$1"
   local minute="$2"
-  printf '%s/%s.plist' "$PLIST_DIR" "$(label_for_time "$hour" "$minute")"
+  local key="$3"
+  printf '%s/%s.plist' "$PLIST_DIR" "$(label_for_alert "$hour" "$minute" "$key")"
 }
 
-notify_script_for_time() {
+notify_script_for_alert() {
   local hour="$1"
   local minute="$2"
-  printf '%s/notify-h%02dm%02d.sh' "$STATE_DIR" "$hour" "$minute"
+  local key="$3"
+  printf '%s/notify-h%02dm%02d-%s.sh' "$STATE_DIR" "$hour" "$minute" "$key"
 }
 
 bootout_if_loaded() {
@@ -117,14 +130,15 @@ EOF
 register_alert() {
   local hour="$1"
   local minute="$2"
-  local message="$3"
+  local key="$3"
+  local message="$4"
   local label
   local plist
   local notify_script
 
-  label="$(label_for_time "$hour" "$minute")"
-  plist="$(plist_for_time "$hour" "$minute")"
-  notify_script="$(notify_script_for_time "$hour" "$minute")"
+  label="$(label_for_alert "$hour" "$minute" "$key")"
+  plist="$(plist_for_alert "$hour" "$minute" "$key")"
+  notify_script="$(notify_script_for_alert "$hour" "$minute" "$key")"
 
   write_notify_script "$notify_script" "$message"
   bootout_if_loaded "$plist"
@@ -138,17 +152,27 @@ register_alert() {
 cmd_on() {
   require_macos
 
-  register_alert 7 0 "기상"
-  register_alert 7 10 "코테 1문제"
-  register_alert 8 0 "데일리 스크럼"
-  register_alert 8 20 "기업 정하기"
-  register_alert 10 0 "이력서 작성"
-  register_alert 11 0 "포트폴리오 작성"
-  register_alert 13 0 "프로젝트 성능개선 - Habruta(~5/10) / BookPick(~~5월) / OurUniverse(~~6월)"
-  register_alert 17 0 "해커톤 / 오픈소스 / 방향성 점검 / 회고(루틴점검) (3일 주기 운영)"
-  register_alert 19 0 "CS 학습"
-  register_alert 20 0 "못한 작업 하기"
-  register_alert 21 0 "운동"
+  register_alert 7 0 wake "기상"
+  register_alert 7 10 coding-test-start "코테 1문제"
+  register_alert 7 50 coding-test-end "코테 1문제"
+  register_alert 8 0 scrum-start "데일리 스크럼"
+  register_alert 8 20 scrum-end "데일리 스크럼"
+  register_alert 8 20 company-start "기업 정하기"
+  register_alert 9 50 company-end "기업 정하기"
+  register_alert 10 0 resume-start "이력서 작성"
+  register_alert 10 50 resume-end "이력서 작성"
+  register_alert 11 0 portfolio-start "포트폴리오 작성"
+  register_alert 11 50 portfolio-end "포트폴리오 작성"
+  register_alert 13 0 performance-start "프로젝트 성능개선 - Habruta(~5/10) / BookPick(~~5월) / OurUniverse(~~6월)"
+  register_alert 15 50 performance-end "프로젝트 성능개선 - Habruta(~5/10) / BookPick(~~5월) / OurUniverse(~~6월)"
+  register_alert 17 0 direction-start "해커톤 / 오픈소스 / 방향성 점검 / 회고(루틴점검) (3일 주기 운영)"
+  register_alert 17 50 direction-end "해커톤 / 오픈소스 / 방향성 점검 / 회고(루틴점검) (3일 주기 운영)"
+  register_alert 19 0 cs-start "CS 학습"
+  register_alert 19 50 cs-end "CS 학습"
+  register_alert 20 0 catchup-start "못한 작업 하기"
+  register_alert 20 50 catchup-end "못한 작업 하기"
+  register_alert 21 0 workout-start "운동"
+  register_alert 22 0 workout-end "운동"
 }
 
 cmd_off() {

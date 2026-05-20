@@ -50,3 +50,18 @@ plist 위치는 다음과 같습니다.
 ~/Library/LaunchAgents/com.wonhyeonseob.studyalert.m00.plist
 ~/Library/LaunchAgents/com.wonhyeonseob.studyalert.m50.plist
 ```
+
+## Routine Alert
+
+정해둔 하루 루틴을 시작 시간과 끝나는 시간에 맞춰 등록합니다.
+
+```bash
+bin/routine-alert on
+```
+
+운동 종료 알림인 `22:00 운동`까지만 등록합니다.
+
+```bash
+bin/routine-alert off
+bin/routine-alert status
+```
