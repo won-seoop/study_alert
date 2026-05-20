@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+LABEL_PREFIX="com.wonhyeonseob.routinealert"
+PLIST_DIR="$HOME/Library/LaunchAgents"
+STATE_DIR="$HOME/.routine_alert"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  bin/routine-alert on
+  bin/routine-alert off
+  bin/routine-alert status
+
+Routine alerts:
+  07:00 기상
+  07:10 코테 1문제
+  08:00 데일리 스크럼
+  08:20 기업 정하기
+  10:00 이력서 작성
+  11:00 포트폴리오 작성
+  13:00 프로젝트 성능개선 - Habruta(~5/10) / BookPick(~~5월) / OurUniverse(~~6월)
+  17:00 해커톤 / 오픈소스 / 방향성 점검 / 회고(루틴점검) (3일 주기 운영)
+  19:00 CS 학습
+  20:00 못한 작업 하기
+  21:00 운동
+EOF
+}
+
+die() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+require_macos() {
+  [[ "$(uname -s)" == "Darwin" ]] || die "this script is macOS-only"
+}
+
+label_for_time() {
+  local hour="$1"
+  local minute="$2"
+  printf '%s.h%02dm%02d' "$LABEL_PREFIX" "$hour" "$minute"
+}
+
+plist_for_time() {
+  local hour="$1"
+  local minute="$2"
+  printf '%s/%s.plist' "$PLIST_DIR" "$(label_for_time "$hour" "$minute")"
+}
+
+notify_script_for_time() {
+  local hour="$1"
+  local minute="$2"
+  printf '%s/notify-h%02dm%02d.sh' "$STATE_DIR" "$hour" "$minute"
+}
+
+bootout_if_loaded() {
+  local plist="$1"
+  [[ -f "$plist" ]] || return 0
+  launchctl bootout "gui/$(id -u)" "$plist" >/dev/null 2>&1 || true
+}
+
+write_notify_script() {
+  local path="$1"
+  local message="$2"
+
+  mkdir -p "$STATE_DIR"
+  cat > "$path" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+ALERT_MESSAGE=$(printf '%q' "$message")
+
+/usr/bin/osascript - "\$ALERT_MESSAGE" <<'APPLESCRIPT'
+on run argv
+  display dialog (item 1 of argv) with title "Routine Alert" buttons {"OK"} default button "OK" giving up after 20
+end run
+APPLESCRIPT
+EOF
+  chmod +x "$path"
+}
+
+write_plist() {
+  local plist="$1"
+  local label="$2"
+  local notify_script="$3"
+  local hour="$4"
+  local minute="$5"
+
+  mkdir -p "$PLIST_DIR"
+  cat > "$plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$label</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>$notify_script</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>$hour</integer>
+    <key>Minute</key>
+    <integer>$minute</integer>
+  </dict>
+</dict>
+</plist>
+EOF
+}
+
+register_alert() {
+  local hour="$1"
+  local minute="$2"
+  local message="$3"
+  local label
+  local plist
+  local notify_script
+
+  label="$(label_for_time "$hour" "$minute")"
+  plist="$(plist_for_time "$hour" "$minute")"
+  notify_script="$(notify_script_for_time "$hour" "$minute")"
+
+  write_notify_script "$notify_script" "$message"
+  bootout_if_loaded "$plist"
+  write_plist "$plist" "$label" "$notify_script" "$hour" "$minute"
+  launchctl bootstrap "gui/$(id -u)" "$plist"
+  launchctl enable "gui/$(id -u)/$label"
+
+  printf 'ON: %02d:%02d %s\n' "$hour" "$minute" "$message"
+}
+
+cmd_on() {
+  require_macos
+
+  register_alert 7 0 "기상"
+  register_alert 7 10 "코테 1문제"
+  register_alert 8 0 "데일리 스크럼"
+  register_alert 8 20 "기업 정하기"
+  register_alert 10 0 "이력서 작성"
+  register_alert 11 0 "포트폴리오 작성"
+  register_alert 13 0 "프로젝트 성능개선 - Habruta(~5/10) / BookPick(~~5월) / OurUniverse(~~6월)"
+  register_alert 17 0 "해커톤 / 오픈소스 / 방향성 점검 / 회고(루틴점검) (3일 주기 운영)"
+  register_alert 19 0 "CS 학습"
+  register_alert 20 0 "못한 작업 하기"
+  register_alert 21 0 "운동"
+}
+
+cmd_off() {
+  require_macos
+
+  local plist
+  for plist in "$PLIST_DIR/$LABEL_PREFIX".*.plist; do
+    [[ -e "$plist" ]] || continue
+    bootout_if_loaded "$plist"
+    rm -f "$plist"
+  done
+  rm -rf "$STATE_DIR"
+  echo "OFF: routine alert 알림을 모두 해제했습니다."
+}
+
+cmd_status() {
+  require_macos
+
+  local found=0
+  local plist
+  local label
+  for plist in "$PLIST_DIR/$LABEL_PREFIX".*.plist; do
+    [[ -e "$plist" ]] || continue
+    found=1
+    label="$(basename "$plist" .plist)"
+    echo "ON: $plist"
+    launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1 \
+      && echo "loaded: yes" \
+      || echo "loaded: no"
+  done
+
+  if [[ "$found" -eq 0 ]]; then
+    echo "OFF: 등록된 routine alert plist가 없습니다."
+  fi
+}
+
+main() {
+  [[ $# -eq 1 ]] || { usage; exit 1; }
+
+  case "$1" in
+    on)
+      cmd_on
+      ;;
+    off)
+      cmd_off
+      ;;
+    status)
+      cmd_status
+      ;;
+    -h|--help|help)
+      usage
+      ;;
+    *)
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
