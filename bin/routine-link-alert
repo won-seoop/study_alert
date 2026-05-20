@@ -1,0 +1,249 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+LABEL_PREFIX="com.wonhyeonseob.routinelinkalert"
+PLIST_DIR="$HOME/Library/LaunchAgents"
+STATE_DIR="$HOME/.routine_link_alert"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  bin/routine-link-alert on
+  bin/routine-link-alert off
+  bin/routine-link-alert status
+
+Routine link alerts:
+  07:10 코테 1문제 시간입니다. 화이팅
+  07:50 쉬는시간입니다. 고생하셨어요. / 다음시간 : 데일리 스크럼
+  08:00 데일리 스크럼 시간입니다. 화이팅
+  08:20 기업 정하기 1 시간입니다. 화이팅
+  08:50 쉬는시간입니다. 고생하셨어요. / 다음시간 : 기업 정하기 2
+  09:00 기업 정하기 2 시간입니다. 화이팅
+  09:50 쉬는시간입니다. 고생하셨어요. / 다음시간 : 이력서 작성
+  10:00 이력서 작성 시간입니다. 화이팅
+  10:50 쉬는시간입니다. 고생하셨어요. / 다음시간 : 포트폴리오 작성
+  11:00 포트폴리오 작성 시간입니다. 화이팅
+  11:50 쉬는시간입니다. 고생하셨어요. / 다음시간 : 프로젝트 성능개선 - Habruta
+  13:00 프로젝트 성능개선 - Habruta 시간입니다. 화이팅
+  15:50 쉬는시간입니다. 고생하셨어요. / 다음시간 : 해커톤 / 오픈소스 / 방향성 점검 / 회고
+  17:00 해커톤 / 오픈소스 / 방향성 점검 / 회고 시간입니다. 화이팅
+  17:50 쉬는시간입니다. 고생하셨어요. / 다음시간 : CS 학습
+  19:00 CS 학습 시간입니다. 화이팅
+  19:50 쉬는시간입니다. 고생하셨어요. / 다음시간 : 못한 작업 하기
+  20:00 못한 작업 하기 시간입니다. 화이팅
+  20:50 쉬는시간입니다. 고생하셨어요. / 다음시간 : 운동
+  21:00 운동 시간입니다. 화이팅
+EOF
+}
+
+die() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+require_macos() {
+  [[ "$(uname -s)" == "Darwin" ]] || die "this script is macOS-only"
+}
+
+label_for_alert() {
+  local hour="$1"
+  local minute="$2"
+  local key="$3"
+  printf '%s.h%02dm%02d.%s' "$LABEL_PREFIX" "$hour" "$minute" "$key"
+}
+
+plist_for_alert() {
+  local hour="$1"
+  local minute="$2"
+  local key="$3"
+  printf '%s/%s.plist' "$PLIST_DIR" "$(label_for_alert "$hour" "$minute" "$key")"
+}
+
+notify_script_for_alert() {
+  local hour="$1"
+  local minute="$2"
+  local key="$3"
+  printf '%s/notify-h%02dm%02d-%s.sh' "$STATE_DIR" "$hour" "$minute" "$key"
+}
+
+bootout_if_loaded() {
+  local plist="$1"
+  [[ -f "$plist" ]] || return 0
+  launchctl bootout "gui/$(id -u)" "$plist" >/dev/null 2>&1 || true
+}
+
+write_notify_script() {
+  local path="$1"
+  local message="$2"
+  local url="$3"
+
+  mkdir -p "$STATE_DIR"
+  cat > "$path" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+ALERT_MESSAGE=$(printf '%q' "$message")
+ALERT_URL=$(printf '%q' "$url")
+
+if [[ -n "\$ALERT_URL" ]]; then
+  /usr/bin/osascript - "\$ALERT_MESSAGE" "\$ALERT_URL" <<'APPLESCRIPT'
+on run argv
+  set alertMessage to item 1 of argv
+  set targetUrl to item 2 of argv
+  set dialogResult to display dialog alertMessage with title "Routine Alert" buttons {"OK", "열기"} default button "열기" giving up after 20
+  if button returned of dialogResult is "열기" then
+    open location targetUrl
+  end if
+end run
+APPLESCRIPT
+else
+  /usr/bin/osascript - "\$ALERT_MESSAGE" <<'APPLESCRIPT'
+on run argv
+  display dialog (item 1 of argv) with title "Routine Alert" buttons {"OK"} default button "OK" giving up after 20
+end run
+APPLESCRIPT
+fi
+EOF
+  chmod +x "$path"
+}
+
+write_plist() {
+  local plist="$1"
+  local label="$2"
+  local notify_script="$3"
+  local hour="$4"
+  local minute="$5"
+
+  mkdir -p "$PLIST_DIR"
+  cat > "$plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$label</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>$notify_script</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>$hour</integer>
+    <key>Minute</key>
+    <integer>$minute</integer>
+  </dict>
+</dict>
+</plist>
+EOF
+}
+
+register_alert() {
+  local hour="$1"
+  local minute="$2"
+  local key="$3"
+  local message="$4"
+  local url="${5:-}"
+  local label
+  local plist
+  local notify_script
+
+  label="$(label_for_alert "$hour" "$minute" "$key")"
+  plist="$(plist_for_alert "$hour" "$minute" "$key")"
+  notify_script="$(notify_script_for_alert "$hour" "$minute" "$key")"
+
+  write_notify_script "$notify_script" "$message" "$url"
+  bootout_if_loaded "$plist"
+  write_plist "$plist" "$label" "$notify_script" "$hour" "$minute"
+  launchctl bootstrap "gui/$(id -u)" "$plist"
+  launchctl enable "gui/$(id -u)/$label"
+
+  printf 'ON: %02d:%02d %s\n' "$hour" "$minute" "$message"
+}
+
+cmd_on() {
+  require_macos
+
+  register_alert 7 10 coding-test-start "코테 1문제 시간입니다. 화이팅" "https://www.notion.so/34c25e3f71a480959b5de7483e5a5050?pvs=21"
+  register_alert 7 50 coding-test-end $'쉬는시간입니다. 고생하셨어요.\n다음시간 : 데일리 스크럼'
+  register_alert 8 0 scrum-start "데일리 스크럼 시간입니다. 화이팅" "https://www.notion.so/3621be07d6f78065803dcc39ca828b0b?pvs=21"
+  register_alert 8 20 company-one-start "기업 정하기 1 시간입니다. 화이팅" "https://www.notion.so/36625e3f71a4807d9a62e720febade95?pvs=21"
+  register_alert 8 50 company-one-end $'쉬는시간입니다. 고생하셨어요.\n다음시간 : 기업 정하기 2'
+  register_alert 9 0 company-two-start "기업 정하기 2 시간입니다. 화이팅" "https://www.notion.so/36625e3f71a4807d9a62e720febade95?pvs=21"
+  register_alert 9 50 company-two-end $'쉬는시간입니다. 고생하셨어요.\n다음시간 : 이력서 작성'
+  register_alert 10 0 resume-start "이력서 작성 시간입니다. 화이팅" "https://www.notion.so/36225e3f71a48010883ad5d5945cde13?pvs=21"
+  register_alert 10 50 resume-end $'쉬는시간입니다. 고생하셨어요.\n다음시간 : 포트폴리오 작성'
+  register_alert 11 0 portfolio-start "포트폴리오 작성 시간입니다. 화이팅" "https://www.notion.so/32125e3f71a480a5a3a0f810592c1a8c?pvs=21"
+  register_alert 11 50 portfolio-end $'쉬는시간입니다. 고생하셨어요.\n다음시간 : 프로젝트 성능개선 - Habruta'
+  register_alert 13 0 performance-start "프로젝트 성능개선 - Habruta 시간입니다. 화이팅" "https://www.notion.so/shopping-mall/36625e3f71a480a4a0bac09a1f93a6cf?v=36625e3f71a480fa943b000c8b32ab86"
+  register_alert 15 50 performance-end $'쉬는시간입니다. 고생하셨어요.\n다음시간 : 해커톤 / 오픈소스 / 방향성 점검 / 회고'
+  register_alert 17 0 direction-start "해커톤 / 오픈소스 / 방향성 점검 / 회고 시간입니다. 화이팅" "https://www.notion.so/34c25e3f71a480dc9a0ec2d8549aefbd?pvs=21"
+  register_alert 17 50 direction-end $'쉬는시간입니다. 고생하셨어요.\n다음시간 : CS 학습'
+  register_alert 19 0 cs-start "CS 학습 시간입니다. 화이팅" "https://www.notion.so/shopping-mall/CS-34c25e3f71a480cf82f4e3ffd04d5714"
+  register_alert 19 50 cs-end $'쉬는시간입니다. 고생하셨어요.\n다음시간 : 못한 작업 하기'
+  register_alert 20 0 catchup-start "못한 작업 하기 시간입니다. 화이팅"
+  register_alert 20 50 catchup-end $'쉬는시간입니다. 고생하셨어요.\n다음시간 : 운동'
+  register_alert 21 0 workout-start "운동 시간입니다. 화이팅"
+}
+
+cmd_off() {
+  require_macos
+
+  local plist
+  for plist in "$PLIST_DIR/$LABEL_PREFIX".*.plist; do
+    [[ -e "$plist" ]] || continue
+    bootout_if_loaded "$plist"
+    rm -f "$plist"
+  done
+  rm -rf "$STATE_DIR"
+  echo "OFF: routine link alert 알림을 모두 해제했습니다."
+}
+
+cmd_status() {
+  require_macos
+
+  local found=0
+  local plist
+  local label
+  for plist in "$PLIST_DIR/$LABEL_PREFIX".*.plist; do
+    [[ -e "$plist" ]] || continue
+    found=1
+    label="$(basename "$plist" .plist)"
+    echo "ON: $plist"
+    launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1 \
+      && echo "loaded: yes" \
+      || echo "loaded: no"
+  done
+
+  if [[ "$found" -eq 0 ]]; then
+    echo "OFF: 등록된 routine link alert plist가 없습니다."
+  fi
+}
+
+main() {
+  [[ $# -eq 1 ]] || { usage; exit 1; }
+
+  case "$1" in
+    on)
+      cmd_on
+      ;;
+    off)
+      cmd_off
+      ;;
+    status)
+      cmd_status
+      ;;
+    -h|--help|help)
+      usage
+      ;;
+    *)
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

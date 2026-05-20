@@ -65,3 +65,18 @@ bin/routine-alert on
 bin/routine-alert off
 bin/routine-alert status
 ```
+
+## Routine Link Alert
+
+루틴 시작 알림에 `열기` 버튼을 붙여 관련 페이지를 바로 엽니다.
+
+```bash
+bin/routine-link-alert on
+```
+
+끄기와 상태 확인:
+
+```bash
+bin/routine-link-alert off
+bin/routine-link-alert status
+```
