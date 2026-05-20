@@ -3,15 +3,22 @@
 macOS 전용 무음 팝업 알림 스케줄러입니다.
 
 ```bash
-bin/study-alert on 8 15 50
+bin/study-alert on 8 15
 ```
 
-위 명령은 매일 `08:50`, `09:50`, `10:50`, ..., `15:50`에 알림을 띄웁니다.
-기본 문구는 `[{minute}] 쉬는시간입니다. 고생하셨어요.` 입니다.
+위 명령은 매일 `08:00`, `08:50`, ..., `15:00`, `15:50`에 알림을 띄웁니다.
+
+기본 문구는 다음과 같습니다.
+
+```text
+[{minute}] 공부시간입니다. 화이팅
+[{minute}] 쉬는시간입니다. 고생하셨어요.
+```
 
 문구를 직접 지정할 수도 있습니다.
 
 ```bash
+bin/study-alert on 8 15 0 "[{minute}] 공부시간입니다. 화이팅"
 bin/study-alert on 8 15 50 "[{minute}] 물 마시고 쉬세요."
 ```
 
@@ -33,5 +40,6 @@ bin/study-alert status
 plist 위치는 다음과 같습니다.
 
 ```text
-~/Library/LaunchAgents/com.wonhyeonseob.studyalert.plist
+~/Library/LaunchAgents/com.wonhyeonseob.studyalert.m00.plist
+~/Library/LaunchAgents/com.wonhyeonseob.studyalert.m50.plist
 ```

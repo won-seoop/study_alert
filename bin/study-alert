@@ -11,11 +11,13 @@ NOTIFY_SCRIPT=""
 usage() {
   cat <<'EOF'
 Usage:
+  bin/study-alert on <start_hour> <end_hour>
   bin/study-alert on <start_hour> <end_hour> <minute> [message]
   bin/study-alert off
   bin/study-alert status
 
 Examples:
+  bin/study-alert on 8 15      # 08:00/08:50, ... 15:00/15:50 every day
   bin/study-alert on 8 15 50   # 08:50, 09:50, ... 15:50 every day
   bin/study-alert on 8 15 0 "[{minute}] 공부시간입니다. 화이팅"
   bin/study-alert on 8 15 50 "[{minute}] 쉬는시간입니다. 고생하셨어요."
@@ -28,6 +30,9 @@ Notes:
   - Use {minute} in the message to insert the current minute.
 EOF
 }
+
+DEFAULT_STUDY_MESSAGE="[{minute}] 공부시간입니다. 화이팅"
+DEFAULT_BREAK_MESSAGE="[{minute}] 쉬는시간입니다. 고생하셨어요."
 
 die() {
   echo "error: $*" >&2
@@ -125,30 +130,12 @@ EOF
   } > "$PLIST"
 }
 
-cmd_on() {
-  [[ $# -ge 3 ]] || { usage; exit 1; }
-
+register_alert() {
   local start_hour="$1"
   local end_hour="$2"
   local minute="$3"
-  shift 3
-  local message
-  if [[ $# -gt 0 ]]; then
-    message="$*"
-  else
-    message="[{minute}] 쉬는시간입니다. 고생하셨어요."
-  fi
+  local message="$4"
 
-  validate_number "start_hour" "$start_hour"
-  validate_number "end_hour" "$end_hour"
-  validate_number "minute" "$minute"
-
-  (( start_hour >= 0 && start_hour <= 23 )) || die "start_hour must be 0-23"
-  (( end_hour >= 0 && end_hour <= 23 )) || die "end_hour must be 0-23"
-  (( start_hour <= end_hour )) || die "start_hour must be less than or equal to end_hour"
-  (( minute >= 0 && minute <= 59 )) || die "minute must be 0-59"
-
-  require_macos
   set_paths_for_minute "$minute"
   write_notify_script "$message"
   bootout_if_loaded "$PLIST"
@@ -160,6 +147,51 @@ cmd_on() {
     "$start_hour" "$minute" "$end_hour" "$minute" "$minute"
   echo "message: $message"
   echo "plist: $PLIST"
+}
+
+validate_schedule() {
+  local start_hour="$1"
+  local end_hour="$2"
+  local minute="${3:-0}"
+
+  validate_number "start_hour" "$start_hour"
+  validate_number "end_hour" "$end_hour"
+  validate_number "minute" "$minute"
+
+  (( start_hour >= 0 && start_hour <= 23 )) || die "start_hour must be 0-23"
+  (( end_hour >= 0 && end_hour <= 23 )) || die "end_hour must be 0-23"
+  (( start_hour <= end_hour )) || die "start_hour must be less than or equal to end_hour"
+  (( minute >= 0 && minute <= 59 )) || die "minute must be 0-59"
+}
+
+cmd_on() {
+  [[ $# -eq 2 || $# -ge 3 ]] || { usage; exit 1; }
+
+  local start_hour="$1"
+  local end_hour="$2"
+  require_macos
+
+  if [[ $# -eq 2 ]]; then
+    validate_schedule "$start_hour" "$end_hour" 0
+    validate_schedule "$start_hour" "$end_hour" 50
+    register_alert "$start_hour" "$end_hour" 0 "$DEFAULT_STUDY_MESSAGE"
+    register_alert "$start_hour" "$end_hour" 50 "$DEFAULT_BREAK_MESSAGE"
+    return
+  fi
+
+  local minute="$3"
+  shift 3
+  local message
+  if [[ $# -gt 0 ]]; then
+    message="$*"
+  elif [[ "$minute" -eq 0 ]]; then
+    message="$DEFAULT_STUDY_MESSAGE"
+  else
+    message="$DEFAULT_BREAK_MESSAGE"
+  fi
+
+  validate_schedule "$start_hour" "$end_hour" "$minute"
+  register_alert "$start_hour" "$end_hour" "$minute" "$message"
 }
 
 cmd_off() {
