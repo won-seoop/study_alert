@@ -164,6 +164,33 @@ register_alert() {
   printf 'ON: %02d:%02d %s\n' "$hour" "$minute" "$message"
 }
 
+status_row() {
+  local hour="$1"
+  local minute="$2"
+  local key="$3"
+  local title="$4"
+  local link="${5:-}"
+  local label
+  local plist
+  local state="[OFF]"
+  local link_state="-"
+
+  label="$(label_for_alert "$hour" "$minute" "$key")"
+  plist="$(plist_for_alert "$hour" "$minute" "$key")"
+
+  if launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; then
+    state="[ON]"
+  elif [[ -f "$plist" ]]; then
+    state="[PLIST]"
+  fi
+
+  if [[ -n "$link" ]]; then
+    link_state="link"
+  fi
+
+  printf '%-7s %02d:%02d  %-6s %s\n' "$state" "$hour" "$minute" "$link_state" "$title"
+}
+
 cmd_on() {
   require_macos
 
@@ -205,22 +232,30 @@ cmd_off() {
 cmd_status() {
   require_macos
 
-  local found=0
-  local plist
-  local label
-  for plist in "$PLIST_DIR/$LABEL_PREFIX".*.plist; do
-    [[ -e "$plist" ]] || continue
-    found=1
-    label="$(basename "$plist" .plist)"
-    echo "ON: $plist"
-    launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1 \
-      && echo "loaded: yes" \
-      || echo "loaded: no"
-  done
-
-  if [[ "$found" -eq 0 ]]; then
-    echo "OFF: 등록된 routine link alert plist가 없습니다."
-  fi
+  echo "Routine Link Alert 적용 상태"
+  echo "-----------------------------"
+  status_row 7 10 coding-test-start "코테 1문제 시간입니다. 화이팅" link
+  status_row 7 50 coding-test-end "쉬는시간 -> 데일리 스크럼"
+  status_row 8 0 scrum-start "데일리 스크럼 시간입니다. 화이팅" link
+  status_row 8 20 company-one-start "기업 정하기 1 시간입니다. 화이팅" link
+  status_row 8 50 company-one-end "쉬는시간 -> 기업 정하기 2"
+  status_row 9 0 company-two-start "기업 정하기 2 시간입니다. 화이팅" link
+  status_row 9 50 company-two-end "쉬는시간 -> 이력서 작성"
+  status_row 10 0 resume-start "이력서 작성 시간입니다. 화이팅" link
+  status_row 10 50 resume-end "쉬는시간 -> 포트폴리오 작성"
+  status_row 11 0 portfolio-start "포트폴리오 작성 시간입니다. 화이팅" link
+  status_row 11 50 portfolio-end "쉬는시간 -> 프로젝트 성능개선 - Habruta"
+  status_row 13 0 performance-start "프로젝트 성능개선 - Habruta 시간입니다. 화이팅" link
+  status_row 15 50 performance-end "쉬는시간 -> 해커톤 / 오픈소스 / 방향성 점검 / 회고"
+  status_row 17 0 direction-start "해커톤 / 오픈소스 / 방향성 점검 / 회고 시간입니다. 화이팅" link
+  status_row 17 50 direction-end "쉬는시간 -> CS 학습"
+  status_row 19 0 cs-start "CS 학습 시간입니다. 화이팅" link
+  status_row 19 50 cs-end "쉬는시간 -> 못한 작업 하기"
+  status_row 20 0 catchup-start "못한 작업 하기 시간입니다. 화이팅"
+  status_row 20 50 catchup-end "쉬는시간 -> 운동"
+  status_row 21 0 workout-start "운동 시간입니다. 화이팅"
+  echo
+  echo "[ON]=적용됨  [OFF]=미등록  [PLIST]=파일만 있고 로드 안 됨"
 }
 
 main() {
