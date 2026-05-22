@@ -25,7 +25,13 @@ Routine link alerts:
   11:00 포트폴리오 작성 시간입니다. 화이팅
   11:50 쉬는시간입니다. 고생하셨어요. / 다음시간 : 프로젝트 성능개선 - Habruta
   13:00 프로젝트 성능개선 - Habruta 시간입니다. 화이팅
-  15:50 쉬는시간입니다. 고생하셨어요. / 다음시간 : 해커톤 / 오픈소스 / 방향성 점검 / 회고
+  13:50 쉬는시간입니다. 고생하셨어요. / 다음시간 : 프로젝트 성능개선 - Habruta
+  14:00 프로젝트 성능개선 - Habruta 시간입니다. 화이팅
+  14:50 쉬는시간입니다. 고생하셨어요. / 다음시간 : 프로젝트 성능개선 - Habruta
+  15:00 프로젝트 성능개선 - Habruta 시간입니다. 화이팅
+  15:50 쉬는시간입니다. 고생하셨어요. / 다음시간 : 프로젝트 성능개선 - Habruta
+  16:00 프로젝트 성능개선 - Habruta 시간입니다. 화이팅
+  16:50 쉬는시간입니다. 고생하셨어요. / 다음시간 : 해커톤 / 오픈소스 / 방향성 점검 / 회고
   17:00 해커톤 / 오픈소스 / 방향성 점검 / 회고 시간입니다. 화이팅
   17:50 쉬는시간입니다. 고생하셨어요. / 다음시간 : CS 학습
   19:00 CS 학습 시간입니다. 화이팅
@@ -205,8 +211,14 @@ cmd_on() {
   register_alert 10 50 resume-end $'쉬는시간입니다. 고생하셨어요.\n다음시간 : 포트폴리오 작성'
   register_alert 11 0 portfolio-start "포트폴리오 작성 시간입니다. 화이팅" "https://www.notion.so/32125e3f71a480a5a3a0f810592c1a8c?pvs=21"
   register_alert 11 50 portfolio-end $'쉬는시간입니다. 고생하셨어요.\n다음시간 : 프로젝트 성능개선 - Habruta'
-  register_alert 13 0 performance-start "프로젝트 성능개선 - Habruta 시간입니다. 화이팅" "https://www.notion.so/shopping-mall/36625e3f71a480a4a0bac09a1f93a6cf?v=36625e3f71a480fa943b000c8b32ab86"
-  register_alert 15 50 performance-end $'쉬는시간입니다. 고생하셨어요.\n다음시간 : 해커톤 / 오픈소스 / 방향성 점검 / 회고'
+  register_alert 13 0 performance-13-start "프로젝트 성능개선 - Habruta 시간입니다. 화이팅" "https://www.notion.so/shopping-mall/36625e3f71a480a4a0bac09a1f93a6cf?v=36625e3f71a480fa943b000c8b32ab86"
+  register_alert 13 50 performance-13-end $'쉬는시간입니다. 고생하셨어요.\n다음시간 : 프로젝트 성능개선 - Habruta'
+  register_alert 14 0 performance-14-start "프로젝트 성능개선 - Habruta 시간입니다. 화이팅" "https://www.notion.so/shopping-mall/36625e3f71a480a4a0bac09a1f93a6cf?v=36625e3f71a480fa943b000c8b32ab86"
+  register_alert 14 50 performance-14-end $'쉬는시간입니다. 고생하셨어요.\n다음시간 : 프로젝트 성능개선 - Habruta'
+  register_alert 15 0 performance-15-start "프로젝트 성능개선 - Habruta 시간입니다. 화이팅" "https://www.notion.so/shopping-mall/36625e3f71a480a4a0bac09a1f93a6cf?v=36625e3f71a480fa943b000c8b32ab86"
+  register_alert 15 50 performance-15-end $'쉬는시간입니다. 고생하셨어요.\n다음시간 : 프로젝트 성능개선 - Habruta'
+  register_alert 16 0 performance-16-start "프로젝트 성능개선 - Habruta 시간입니다. 화이팅" "https://www.notion.so/shopping-mall/36625e3f71a480a4a0bac09a1f93a6cf?v=36625e3f71a480fa943b000c8b32ab86"
+  register_alert 16 50 performance-16-end $'쉬는시간입니다. 고생하셨어요.\n다음시간 : 해커톤 / 오픈소스 / 방향성 점검 / 회고'
   register_alert 17 0 direction-start "해커톤 / 오픈소스 / 방향성 점검 / 회고 시간입니다. 화이팅" "https://www.notion.so/34c25e3f71a480dc9a0ec2d8549aefbd?pvs=21"
   register_alert 17 50 direction-end $'쉬는시간입니다. 고생하셨어요.\n다음시간 : CS 학습'
   register_alert 19 0 cs-start "CS 학습 시간입니다. 화이팅" "https://www.notion.so/shopping-mall/CS-34c25e3f71a480cf82f4e3ffd04d5714"
@@ -245,8 +257,14 @@ cmd_status() {
   status_row 10 50 resume-end "쉬는시간 -> 포트폴리오 작성"
   status_row 11 0 portfolio-start "포트폴리오 작성 시간입니다. 화이팅" link
   status_row 11 50 portfolio-end "쉬는시간 -> 프로젝트 성능개선 - Habruta"
-  status_row 13 0 performance-start "프로젝트 성능개선 - Habruta 시간입니다. 화이팅" link
-  status_row 15 50 performance-end "쉬는시간 -> 해커톤 / 오픈소스 / 방향성 점검 / 회고"
+  status_row 13 0 performance-13-start "프로젝트 성능개선 - Habruta 시간입니다. 화이팅" link
+  status_row 13 50 performance-13-end "쉬는시간 -> 프로젝트 성능개선 - Habruta"
+  status_row 14 0 performance-14-start "프로젝트 성능개선 - Habruta 시간입니다. 화이팅" link
+  status_row 14 50 performance-14-end "쉬는시간 -> 프로젝트 성능개선 - Habruta"
+  status_row 15 0 performance-15-start "프로젝트 성능개선 - Habruta 시간입니다. 화이팅" link
+  status_row 15 50 performance-15-end "쉬는시간 -> 프로젝트 성능개선 - Habruta"
+  status_row 16 0 performance-16-start "프로젝트 성능개선 - Habruta 시간입니다. 화이팅" link
+  status_row 16 50 performance-16-end "쉬는시간 -> 해커톤 / 오픈소스 / 방향성 점검 / 회고"
   status_row 17 0 direction-start "해커톤 / 오픈소스 / 방향성 점검 / 회고 시간입니다. 화이팅" link
   status_row 17 50 direction-end "쉬는시간 -> CS 학습"
   status_row 19 0 cs-start "CS 학습 시간입니다. 화이팅" link
