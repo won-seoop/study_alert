@@ -7,17 +7,27 @@ STATE_DIR="$HOME/.study_alert"
 LABEL=""
 PLIST=""
 NOTIFY_SCRIPT=""
+BLOCK_GUARD_LABEL="$LABEL_PREFIX.blockguard"
+BLOCK_GUARD_PLIST="$PLIST_DIR/$BLOCK_GUARD_LABEL.plist"
+BLOCK_GUARD_SCRIPT="$STATE_DIR/block-guard.sh"
 
 usage() {
   cat <<'EOF'
 Usage:
   bin/study-alert on <start_hour> <end_hour>
   bin/study-alert on <start_hour> <end_hour> <minute> [message]
+  bin/study-alert school
+  bin/study-alert block on|off|status
+  bin/study-alert block install
   bin/study-alert off
   bin/study-alert status
 
 Examples:
-  bin/study-alert on 8 15      # 08:00/08:50, ... 15:00/15:50 every day
+  bin/study-alert school      # school-style class/break schedule
+  bin/study-alert block install # install helper for automatic site blocking
+  bin/study-alert block on    # block distracting sites
+  bin/study-alert block off   # unblock distracting sites
+  bin/study-alert on 8 15      # every 50 minutes between 08:00 and 15:59
   bin/study-alert on 8 15 50   # 08:50, 09:50, ... 15:50 every day
   bin/study-alert on 8 15 0 "[{minute}] 공부시간입니다. 화이팅"
   bin/study-alert on 8 15 50 "[{minute}] 쉬는시간입니다. 고생하셨어요."
@@ -33,6 +43,48 @@ EOF
 
 DEFAULT_STUDY_MESSAGE="[{minute}] 공부시간입니다. 화이팅"
 DEFAULT_BREAK_MESSAGE="[{minute}] 쉬는시간입니다. 고생하셨어요."
+DEFAULT_INTERVAL_MINUTES=50
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+HOSTS_FILE="/etc/hosts"
+BLOCK_HELPER="/usr/local/sbin/study-alert-block-sites"
+BLOCK_SUDOERS="/etc/sudoers.d/study-alert-block-sites"
+BLOCK_MARKER_BEGIN="# study-alert block begin"
+BLOCK_MARKER_END="# study-alert block end"
+BLOCK_DOMAINS=(
+  "youtube.com"
+  "www.youtube.com"
+  "m.youtube.com"
+  "youtu.be"
+  "music.youtube.com"
+  "studio.youtube.com"
+  "youtube-nocookie.com"
+  "www.youtube-nocookie.com"
+  "youtubei.googleapis.com"
+  "instagram.com"
+  "www.instagram.com"
+  "m.instagram.com"
+  "comic.naver.com"
+  "m.comic.naver.com"
+  "webtoon.naver.com"
+  "m.webtoon.naver.com"
+  "chzzk.naver.com"
+  "m.chzzk.naver.com"
+  "api.chzzk.naver.com"
+  "webtoon.kakao.com"
+  "page.kakao.com"
+  "afreecatv.com"
+  "www.afreecatv.com"
+  "play.afreecatv.com"
+  "vod.afreecatv.com"
+  "sooplive.co.kr"
+  "www.sooplive.co.kr"
+  "play.sooplive.co.kr"
+  "facebook.com"
+  "www.facebook.com"
+  "m.facebook.com"
+  "fb.com"
+  "fb.watch"
+)
 
 die() {
   echo "error: $*" >&2
@@ -51,9 +103,27 @@ validate_number() {
 
 set_paths_for_minute() {
   local minute="$1"
-  LABEL="$LABEL_PREFIX.m$(printf '%02d' "$minute")"
+  local minute_num=$((10#$minute))
+  LABEL="$LABEL_PREFIX.m$(printf '%02d' "$minute_num")"
   PLIST="$PLIST_DIR/$LABEL.plist"
-  NOTIFY_SCRIPT="$STATE_DIR/notify-m$(printf '%02d' "$minute").sh"
+  NOTIFY_SCRIPT="$STATE_DIR/notify-m$(printf '%02d' "$minute_num").sh"
+}
+
+set_paths_for_interval() {
+  LABEL="$LABEL_PREFIX.interval50"
+  PLIST="$PLIST_DIR/$LABEL.plist"
+  NOTIFY_SCRIPT="$STATE_DIR/notify-interval50.sh"
+}
+
+set_paths_for_event() {
+  local hour="$1"
+  local minute="$2"
+  local key="$3"
+  local hour_num=$((10#$hour))
+  local minute_num=$((10#$minute))
+  LABEL="$LABEL_PREFIX.school.h$(printf '%02d' "$hour_num")m$(printf '%02d' "$minute_num").$key"
+  PLIST="$PLIST_DIR/$LABEL.plist"
+  NOTIFY_SCRIPT="$STATE_DIR/notify-school-h$(printf '%02d' "$hour_num")m$(printf '%02d' "$minute_num")-$key.sh"
 }
 
 bootout_if_loaded() {
@@ -62,8 +132,23 @@ bootout_if_loaded() {
   launchctl bootout "gui/$(id -u)" "$plist" >/dev/null 2>&1 || true
 }
 
+remove_existing_alerts() {
+  local plist
+  for plist in "$PLIST_DIR/$LABEL_PREFIX".plist "$PLIST_DIR/$LABEL_PREFIX".*.plist; do
+    [[ -e "$plist" ]] || continue
+    bootout_if_loaded "$plist"
+    rm -f "$plist"
+  done
+  rm -f "$STATE_DIR"/notify.sh "$STATE_DIR"/notify-m*.sh "$STATE_DIR"/notify-interval50.sh
+  rm -f "$STATE_DIR"/notify-school-*.sh
+  rm -f "$BLOCK_GUARD_SCRIPT"
+}
+
 write_notify_script() {
   local message="$1"
+  local start_hour="${2:-}"
+  local end_hour="${3:-}"
+  local block_action="${4:-}"
 
   mkdir -p "$STATE_DIR"
   cat > "$NOTIFY_SCRIPT" <<EOF
@@ -71,8 +156,27 @@ write_notify_script() {
 set -euo pipefail
 
 ALERT_MESSAGE=$(printf '%q' "$message")
+START_HOUR=$(printf '%q' "$start_hour")
+END_HOUR=$(printf '%q' "$end_hour")
+BLOCK_ACTION=$(printf '%q' "$block_action")
+SCRIPT_PATH=$(printf '%q' "$SCRIPT_PATH")
 
 minute="\$(date '+%M')"
+hour="\$(date '+%H')"
+
+if [[ -n "\$START_HOUR" && -n "\$END_HOUR" ]]; then
+  current_hour=\$((10#\$hour))
+  start_bound=\$((10#\$START_HOUR))
+  end_bound=\$((10#\$END_HOUR))
+  if (( current_hour < start_bound || current_hour > end_bound )); then
+    exit 0
+  fi
+fi
+
+if [[ -n "\$BLOCK_ACTION" ]]; then
+  "\$SCRIPT_PATH" block "\$BLOCK_ACTION" --quiet >/dev/null 2>&1 || true
+fi
+
 message="\${ALERT_MESSAGE//\\{minute\\}/\$minute}"
 
 /usr/bin/osascript - "\$message" <<'APPLESCRIPT'
@@ -88,6 +192,9 @@ write_plist() {
   local start_hour="$1"
   local end_hour="$2"
   local minute="$3"
+  local start_num=$((10#$start_hour))
+  local end_num=$((10#$end_hour))
+  local minute_num=$((10#$minute))
 
   mkdir -p "$(dirname "$PLIST")"
 
@@ -111,7 +218,58 @@ write_plist() {
 EOF
 
     local hour
-    for ((hour = start_hour; hour <= end_hour; hour++)); do
+    for ((hour = start_num; hour <= end_num; hour++)); do
+      cat <<EOF
+    <dict>
+      <key>Hour</key>
+      <integer>$hour</integer>
+      <key>Minute</key>
+      <integer>$minute_num</integer>
+    </dict>
+EOF
+    done
+
+    cat <<'EOF'
+  </array>
+</dict>
+</plist>
+EOF
+  } > "$PLIST"
+}
+
+write_interval_plist() {
+  local start_hour="$1"
+  local end_hour="$2"
+  local start_total=$((10#$start_hour * 60))
+  local end_total=$((10#$end_hour * 60 + 59))
+  local total
+  local hour
+  local minute
+
+  mkdir -p "$(dirname "$PLIST")"
+
+  {
+    cat <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$LABEL</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>$NOTIFY_SCRIPT</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <array>
+EOF
+
+    for ((total = start_total; total <= end_total; total += DEFAULT_INTERVAL_MINUTES)); do
+      hour=$((total / 60))
+      minute=$((total % 60))
       cat <<EOF
     <dict>
       <key>Hour</key>
@@ -130,11 +288,132 @@ EOF
   } > "$PLIST"
 }
 
+write_event_plist() {
+  local hour="$1"
+  local minute="$2"
+  local hour_num=$((10#$hour))
+  local minute_num=$((10#$minute))
+
+  mkdir -p "$(dirname "$PLIST")"
+
+  cat > "$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$LABEL</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>$NOTIFY_SCRIPT</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>$hour_num</integer>
+    <key>Minute</key>
+    <integer>$minute_num</integer>
+  </dict>
+</dict>
+</plist>
+EOF
+}
+
+write_block_guard_script() {
+  mkdir -p "$STATE_DIR"
+  cat > "$BLOCK_GUARD_SCRIPT" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH=$(printf '%q' "$SCRIPT_PATH")
+
+"\$SCRIPT_PATH" block status | grep -q 'BLOCK: ON' || exit 0
+
+/usr/bin/osascript <<'APPLESCRIPT' >/dev/null 2>&1 || true
+set blockedPatterns to {"youtube.com", "youtu.be", "youtube-nocookie.com", "youtubei.googleapis.com", "instagram.com", "comic.naver.com", "webtoon.naver.com", "chzzk.naver.com", "webtoon.kakao.com", "page.kakao.com", "afreecatv.com", "sooplive.co.kr", "facebook.com", "fb.com", "fb.watch"}
+
+if application "Google Chrome" is running then
+  tell application "Google Chrome"
+    repeat with w in windows
+      repeat with t in tabs of w
+        set tabUrl to URL of t
+        repeat with blockedPattern in blockedPatterns
+          if tabUrl contains (blockedPattern as text) then
+            close t
+            exit repeat
+          end if
+        end repeat
+      end repeat
+    end repeat
+  end tell
+end if
+APPLESCRIPT
+EOF
+  chmod +x "$BLOCK_GUARD_SCRIPT"
+}
+
+write_block_guard_plist() {
+  mkdir -p "$(dirname "$BLOCK_GUARD_PLIST")"
+  cat > "$BLOCK_GUARD_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$BLOCK_GUARD_LABEL</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>$BLOCK_GUARD_SCRIPT</string>
+  </array>
+
+  <key>StartInterval</key>
+  <integer>10</integer>
+</dict>
+</plist>
+EOF
+}
+
+register_block_guard() {
+  write_block_guard_script
+  bootout_if_loaded "$BLOCK_GUARD_PLIST"
+  write_block_guard_plist
+  launchctl bootstrap "gui/$(id -u)" "$BLOCK_GUARD_PLIST"
+  launchctl enable "gui/$(id -u)/$BLOCK_GUARD_LABEL"
+}
+
+register_interval_alert() {
+  local start_hour="$1"
+  local end_hour="$2"
+  local message="$3"
+  local start_num=$((10#$start_hour))
+  local end_num=$((10#$end_hour))
+
+  set_paths_for_interval
+  write_notify_script "$message" "$start_num" "$end_num"
+  bootout_if_loaded "$PLIST"
+  write_interval_plist "$start_num" "$end_num"
+  launchctl bootstrap "gui/$(id -u)" "$PLIST"
+  launchctl enable "gui/$(id -u)/$LABEL"
+
+  printf 'ON: %02d:00부터 %02d:59까지 매일 50분 간격 알림을 등록했습니다.\n' \
+    "$start_num" "$end_num"
+  echo "message: $message"
+  echo "plist: $PLIST"
+}
+
 register_alert() {
   local start_hour="$1"
   local end_hour="$2"
   local minute="$3"
   local message="$4"
+  local start_num=$((10#$start_hour))
+  local end_num=$((10#$end_hour))
+  local minute_num=$((10#$minute))
 
   set_paths_for_minute "$minute"
   write_notify_script "$message"
@@ -144,9 +423,26 @@ register_alert() {
   launchctl enable "gui/$(id -u)/$LABEL"
 
   printf 'ON: %02d:%02d부터 %02d:%02d까지 매일 %02d분 알림을 등록했습니다.\n' \
-    "$start_hour" "$minute" "$end_hour" "$minute" "$minute"
+    "$start_num" "$minute_num" "$end_num" "$minute_num" "$minute_num"
   echo "message: $message"
   echo "plist: $PLIST"
+}
+
+register_school_event() {
+  local hour="$1"
+  local minute="$2"
+  local key="$3"
+  local message="$4"
+  local block_action="${5:-}"
+
+  set_paths_for_event "$hour" "$minute" "$key"
+  write_notify_script "$message" "" "" "$block_action"
+  bootout_if_loaded "$PLIST"
+  write_event_plist "$hour" "$minute"
+  launchctl bootstrap "gui/$(id -u)" "$PLIST"
+  launchctl enable "gui/$(id -u)/$LABEL"
+
+  printf 'ON: %02d:%02d %s\n' "$((10#$hour))" "$((10#$minute))" "$message"
 }
 
 validate_schedule() {
@@ -157,11 +453,280 @@ validate_schedule() {
   validate_number "start_hour" "$start_hour"
   validate_number "end_hour" "$end_hour"
   validate_number "minute" "$minute"
+  local start_num=$((10#$start_hour))
+  local end_num=$((10#$end_hour))
+  local minute_num=$((10#$minute))
 
-  (( start_hour >= 0 && start_hour <= 23 )) || die "start_hour must be 0-23"
-  (( end_hour >= 0 && end_hour <= 23 )) || die "end_hour must be 0-23"
-  (( start_hour <= end_hour )) || die "start_hour must be less than or equal to end_hour"
-  (( minute >= 0 && minute <= 59 )) || die "minute must be 0-59"
+  (( start_num >= 0 && start_num <= 23 )) || die "start_hour must be 0-23"
+  (( end_num >= 0 && end_num <= 23 )) || die "end_hour must be 0-23"
+  (( start_num <= end_num )) || die "start_hour must be less than or equal to end_hour"
+  (( minute_num >= 0 && minute_num <= 59 )) || die "minute must be 0-59"
+}
+
+sudo_cmd() {
+  local quiet="$1"
+  shift
+  if [[ "$quiet" -eq 1 ]]; then
+    sudo -n "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+write_hosts_without_block() {
+  local output="$1"
+  awk -v begin="$BLOCK_MARKER_BEGIN" -v end="$BLOCK_MARKER_END" '
+    $0 == begin { skipping = 1; next }
+    $0 == end { skipping = 0; next }
+    !skipping { print }
+  ' "$HOSTS_FILE" > "$output"
+}
+
+flush_dns_cache() {
+  dscacheutil -flushcache >/dev/null 2>&1 || true
+  sudo -n killall -HUP mDNSResponder >/dev/null 2>&1 || true
+}
+
+run_block_helper_if_available() {
+  local action="$1"
+  local quiet="$2"
+
+  [[ -x "$BLOCK_HELPER" ]] || return 1
+  sudo_cmd "$quiet" "$BLOCK_HELPER" "$action"
+}
+
+cmd_block_on() {
+  local quiet="$1"
+  local tmp
+
+  if run_block_helper_if_available on "$quiet"; then
+    write_block_guard_script
+    "$BLOCK_GUARD_SCRIPT" >/dev/null 2>&1 || true
+    echo "BLOCK ON: distracting sites"
+    return
+  fi
+
+  tmp="$(mktemp)"
+  trap 'rm -f "$tmp"' RETURN
+
+  write_hosts_without_block "$tmp"
+  {
+    cat "$tmp"
+    echo "$BLOCK_MARKER_BEGIN"
+    local domain
+    for domain in "${BLOCK_DOMAINS[@]}"; do
+      printf '127.0.0.1 %s\n' "$domain"
+      printf '::1 %s\n' "$domain"
+    done
+    echo "$BLOCK_MARKER_END"
+  } | sudo_cmd "$quiet" tee "$HOSTS_FILE" >/dev/null
+
+  flush_dns_cache
+  write_block_guard_script
+  "$BLOCK_GUARD_SCRIPT" >/dev/null 2>&1 || true
+  echo "BLOCK ON: distracting sites"
+}
+
+cmd_block_off() {
+  local quiet="$1"
+  local tmp
+
+  if run_block_helper_if_available off "$quiet"; then
+    echo "BLOCK OFF: distracting sites"
+    return
+  fi
+
+  tmp="$(mktemp)"
+  trap 'rm -f "$tmp"' RETURN
+
+  write_hosts_without_block "$tmp"
+  sudo_cmd "$quiet" tee "$HOSTS_FILE" < "$tmp" >/dev/null
+
+  flush_dns_cache
+  echo "BLOCK OFF: distracting sites"
+}
+
+cmd_block_status() {
+  if [[ -x "$BLOCK_HELPER" ]] && sudo -n "$BLOCK_HELPER" status >/dev/null 2>&1; then
+    sudo -n "$BLOCK_HELPER" status
+    return
+  fi
+
+  if awk -v begin="$BLOCK_MARKER_BEGIN" '$0 == begin { found = 1 } END { exit found ? 0 : 1 }' "$HOSTS_FILE"; then
+    echo "BLOCK: ON"
+  else
+    echo "BLOCK: OFF"
+  fi
+}
+
+cmd_block_install() {
+  local tmp_helper
+  local tmp_sudoers
+  local current_user
+
+  current_user="$(stat -f '%Su' /dev/console)"
+  [[ "$current_user" != "root" ]] || current_user="${SUDO_USER:-$(id -un)}"
+  tmp_helper="$(mktemp)"
+  tmp_sudoers="$(mktemp)"
+  trap 'rm -f "$tmp_helper" "$tmp_sudoers"' RETURN
+
+  cat > "$tmp_helper" <<'HELPER'
+#!/usr/bin/env bash
+set -euo pipefail
+
+HOSTS_FILE="/etc/hosts"
+BLOCK_MARKER_BEGIN="# study-alert block begin"
+BLOCK_MARKER_END="# study-alert block end"
+BLOCK_DOMAINS=(
+  "youtube.com"
+  "www.youtube.com"
+  "m.youtube.com"
+  "youtu.be"
+  "music.youtube.com"
+  "studio.youtube.com"
+  "youtube-nocookie.com"
+  "www.youtube-nocookie.com"
+  "youtubei.googleapis.com"
+  "instagram.com"
+  "www.instagram.com"
+  "m.instagram.com"
+  "comic.naver.com"
+  "m.comic.naver.com"
+  "webtoon.naver.com"
+  "m.webtoon.naver.com"
+  "chzzk.naver.com"
+  "m.chzzk.naver.com"
+  "api.chzzk.naver.com"
+  "webtoon.kakao.com"
+  "page.kakao.com"
+  "afreecatv.com"
+  "www.afreecatv.com"
+  "play.afreecatv.com"
+  "vod.afreecatv.com"
+  "sooplive.co.kr"
+  "www.sooplive.co.kr"
+  "play.sooplive.co.kr"
+  "facebook.com"
+  "www.facebook.com"
+  "m.facebook.com"
+  "fb.com"
+  "fb.watch"
+)
+
+write_hosts_without_block() {
+  local output="$1"
+  awk -v begin="$BLOCK_MARKER_BEGIN" -v end="$BLOCK_MARKER_END" '
+    $0 == begin { skipping = 1; next }
+    $0 == end { skipping = 0; next }
+    !skipping { print }
+  ' "$HOSTS_FILE" > "$output"
+}
+
+flush_dns_cache() {
+  dscacheutil -flushcache >/dev/null 2>&1 || true
+  killall -HUP mDNSResponder >/dev/null 2>&1 || true
+}
+
+block_on() {
+  local tmp
+  tmp="$(mktemp)"
+  trap 'rm -f "$tmp"' RETURN
+
+  write_hosts_without_block "$tmp"
+  {
+    cat "$tmp"
+    echo "$BLOCK_MARKER_BEGIN"
+    local domain
+    for domain in "${BLOCK_DOMAINS[@]}"; do
+      printf '127.0.0.1 %s\n' "$domain"
+      printf '::1 %s\n' "$domain"
+    done
+    echo "$BLOCK_MARKER_END"
+  } > "$HOSTS_FILE"
+  flush_dns_cache
+}
+
+block_off() {
+  local tmp
+  tmp="$(mktemp)"
+  trap 'rm -f "$tmp"' RETURN
+
+  write_hosts_without_block "$tmp"
+  cat "$tmp" > "$HOSTS_FILE"
+  flush_dns_cache
+}
+
+block_status() {
+  if awk -v begin="$BLOCK_MARKER_BEGIN" '$0 == begin { found = 1 } END { exit found ? 0 : 1 }' "$HOSTS_FILE"; then
+    echo "BLOCK: ON"
+  else
+    echo "BLOCK: OFF"
+  fi
+}
+
+case "${1:-}" in
+  on)
+    block_on
+    ;;
+  off)
+    block_off
+    ;;
+  status)
+    block_status
+    ;;
+  *)
+    echo "Usage: study-alert-block-sites on|off|status" >&2
+    exit 1
+    ;;
+esac
+HELPER
+
+  cat > "$tmp_sudoers" <<EOF
+$current_user ALL=(root) NOPASSWD: $BLOCK_HELPER on, $BLOCK_HELPER off, $BLOCK_HELPER status
+EOF
+
+  sudo visudo -cf "$tmp_sudoers" >/dev/null
+  sudo mkdir -p "$(dirname "$BLOCK_HELPER")"
+  sudo install -o root -g wheel -m 0755 "$tmp_helper" "$BLOCK_HELPER"
+  sudo install -o root -g wheel -m 0440 "$tmp_sudoers" "$BLOCK_SUDOERS"
+  sudo visudo -cf "$BLOCK_SUDOERS" >/dev/null
+
+  trap - RETURN
+  rm -f "$tmp_helper" "$tmp_sudoers"
+  echo "BLOCK HELPER INSTALLED: $BLOCK_HELPER"
+}
+
+cmd_block() {
+  [[ $# -ge 1 ]] || { usage; exit 1; }
+
+  local action="$1"
+  shift
+  local quiet=0
+  if [[ "${1:-}" == "--quiet" ]]; then
+    quiet=1
+    shift
+  fi
+  [[ $# -eq 0 ]] || { usage; exit 1; }
+
+  require_macos
+  case "$action" in
+    on)
+      cmd_block_on "$quiet"
+      ;;
+    off)
+      cmd_block_off "$quiet"
+      ;;
+    status)
+      cmd_block_status
+      ;;
+    install)
+      cmd_block_install
+      ;;
+    *)
+      usage
+      exit 1
+      ;;
+  esac
 }
 
 cmd_on() {
@@ -173,36 +738,59 @@ cmd_on() {
 
   if [[ $# -eq 2 ]]; then
     validate_schedule "$start_hour" "$end_hour" 0
-    validate_schedule "$start_hour" "$end_hour" 50
-    register_alert "$start_hour" "$end_hour" 0 "$DEFAULT_STUDY_MESSAGE"
-    register_alert "$start_hour" "$end_hour" 50 "$DEFAULT_BREAK_MESSAGE"
+    remove_existing_alerts
+    register_interval_alert "$start_hour" "$end_hour" "$DEFAULT_STUDY_MESSAGE"
     return
   fi
 
   local minute="$3"
   shift 3
+  validate_schedule "$start_hour" "$end_hour" "$minute"
+
   local message
   if [[ $# -gt 0 ]]; then
     message="$*"
-  elif [[ "$minute" -eq 0 ]]; then
+  elif (( 10#$minute == 0 )); then
     message="$DEFAULT_STUDY_MESSAGE"
   else
     message="$DEFAULT_BREAK_MESSAGE"
   fi
 
-  validate_schedule "$start_hour" "$end_hour" "$minute"
   register_alert "$start_hour" "$end_hour" "$minute" "$message"
+}
+
+cmd_school() {
+  require_macos
+  remove_existing_alerts
+  register_block_guard
+
+  register_school_event 8 0 class-1 "1교시 시작: 08:00-08:50" on
+  register_school_event 8 50 break-1 "쉬는시간: 09:00까지" off
+  register_school_event 9 0 class-2 "2교시 시작: 09:00-09:50" on
+  register_school_event 9 50 break-2 "쉬는시간: 10:00까지" off
+  register_school_event 10 0 class-3 "3교시 시작: 10:00-10:50" on
+  register_school_event 10 50 break-3 "쉬는시간: 11:00까지" off
+  register_school_event 11 0 class-4 "4교시 시작: 11:00-11:50" on
+  register_school_event 11 50 lunch "점심시간: 13:00까지" off
+  register_school_event 13 0 class-5 "5교시 시작: 13:00-13:50" on
+  register_school_event 13 50 break-5 "쉬는시간: 14:00까지" off
+  register_school_event 14 0 class-6 "6교시 시작: 14:00-14:50" on
+  register_school_event 14 50 break-6 "쉬는시간: 15:00까지" off
+  register_school_event 15 0 class-7 "7교시 시작: 15:00-15:50" on
+  register_school_event 15 50 break-7 "쉬는시간: 16:00까지" off
+  register_school_event 16 0 class-8 "8교시 시작: 16:00-16:50" on
+  register_school_event 16 50 break-8 "쉬는시간: 17:00까지" off
+  register_school_event 17 0 after-school "방과후수업(기타) 시작: 17:00-17:50" on
+  register_school_event 17 50 dinner "저녁시간: 19:00까지" off
+  register_school_event 19 0 night-study-1 "야자 1(기타) 시작: 19:00-19:50" on
+  register_school_event 19 50 night-break-1 "쉬는시간: 20:00까지" off
+  register_school_event 20 0 night-study-2 "야자 2(못한거하기) 시작: 20:00-20:50" on
+  register_school_event 20 50 done "학교식 루틴 종료" off
 }
 
 cmd_off() {
   require_macos
-  local plist
-  for plist in "$PLIST_DIR/$LABEL_PREFIX".plist "$PLIST_DIR/$LABEL_PREFIX".*.plist; do
-    [[ -e "$plist" ]] || continue
-    bootout_if_loaded "$plist"
-    rm -f "$plist"
-  done
-  rm -f "$STATE_DIR"/notify.sh "$STATE_DIR"/notify-m*.sh
+  remove_existing_alerts
   echo "OFF: study alert 알림을 모두 해제했습니다."
 }
 
@@ -233,6 +821,15 @@ main() {
     on)
       shift
       cmd_on "$@"
+      ;;
+    school)
+      shift
+      [[ $# -eq 0 ]] || { usage; exit 1; }
+      cmd_school
+      ;;
+    block)
+      shift
+      cmd_block "$@"
       ;;
     off)
       shift
