@@ -333,7 +333,7 @@ SCRIPT_PATH=$(printf '%q' "$SCRIPT_PATH")
 "\$SCRIPT_PATH" block status | grep -q 'BLOCK: ON' || exit 0
 
 /usr/bin/osascript <<'APPLESCRIPT' >/dev/null 2>&1 || true
-set blockedPatterns to {"youtube.com", "youtu.be", "youtube-nocookie.com", "youtubei.googleapis.com", "instagram.com", "comic.naver.com", "webtoon.naver.com", "chzzk.naver.com", "webtoon.kakao.com", "page.kakao.com", "afreecatv.com", "sooplive.co.kr", "facebook.com", "fb.com", "fb.watch"}
+set blockedPatterns to {"youtube", "youtu.be", "instagram", "comic.naver.com", "webtoon.naver.com", "chzzk.naver.com", "webtoon.kakao.com", "page.kakao.com", "afreeca", "sooplive", "facebook", "fb.com", "fb.watch"}
 
 if application "Google Chrome" is running then
   tell application "Google Chrome"
@@ -372,7 +372,7 @@ write_block_guard_plist() {
   </array>
 
   <key>StartInterval</key>
-  <integer>10</integer>
+  <integer>2</integer>
 </dict>
 </plist>
 EOF
@@ -500,7 +500,7 @@ cmd_block_on() {
   local tmp
 
   if run_block_helper_if_available on "$quiet"; then
-    write_block_guard_script
+    register_block_guard
     "$BLOCK_GUARD_SCRIPT" >/dev/null 2>&1 || true
     echo "BLOCK ON: distracting sites"
     return
@@ -522,7 +522,7 @@ cmd_block_on() {
   } | sudo_cmd "$quiet" tee "$HOSTS_FILE" >/dev/null
 
   flush_dns_cache
-  write_block_guard_script
+  register_block_guard
   "$BLOCK_GUARD_SCRIPT" >/dev/null 2>&1 || true
   echo "BLOCK ON: distracting sites"
 }
